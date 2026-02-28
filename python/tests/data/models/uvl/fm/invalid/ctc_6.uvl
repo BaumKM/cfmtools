@@ -1,0 +1,7 @@
+features
+    Root
+        mandatory
+            A
+            B
+constraints
+    A and B => C

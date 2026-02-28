@@ -1,0 +1,54 @@
+[build-system]
+requires = ["maturin>=1.5"]
+build-backend = "maturin"
+
+[project]
+name = "cfmtools"
+version = "0.1.0"
+description = "Algorithm toolkit for cardinality-based feature models (sampling, normalization, configuration space analyzation)"
+license = { text = "MIT" }
+requires-python = ">=3.14"
+
+authors = [
+  { name = "BaumKM" }
+]
+
+[project.scripts]
+cfmtools = "cfmtools.__main__:main"
+
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "black",
+]
+
+sat = ["ortools"]
+uvl = ["uvlparser"]
+
+all = [
+  "ortools",
+  "uvlparser",
+]
+
+[project.entry-points."cfmtools.plugins"]
+load-json = "cfmtools.plugins.load.json"
+load-uvl-fm = "cfmtools.plugins.load.uvl"
+export-json = "cfmtools.plugins.export.json"
+export-stdout = "cfmtools.plugins.export.stdout"
+transform-big-m = "cfmtools.plugins.transform.big_m"
+transform-trivial-dead-cardinalities = "cfmtools.plugins.transform.dead_cardinalities"
+sample_bt = "cfmtools.plugins.sample.structural.unisample_bt"
+sample_ur = "cfmtools.plugins.sample.structural.unisample_ur"
+analyze_structural_dp = "cfmtools.plugins.analyze.config_space.structural_dp"
+analyze_semi_structural_sat = "cfmtools.plugins.analyze.config_space.semi_structural_sat"
+analyze_feature_tree = "cfmtools.plugins.analyze.feature_tree"
+
+[tool.maturin]
+python-source = "src"
+
+# Installation path
+module-name = "cfmtools.core._cfm_native"
+
+# Path to the Rust bindings crate Cargo.toml
+manifest-path = "../rust/cfm-py/Cargo.toml"

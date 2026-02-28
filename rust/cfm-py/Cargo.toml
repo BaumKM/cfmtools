@@ -1,0 +1,22 @@
+[package]
+name = "cfm-py"
+description = "Python bindings for the cfm-core combinatorial algorithms library"
+
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "_cfm_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+cfm-core = { workspace = true }
+rug = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Python bindings
+pyo3 = { version = "0.28.1", features = ["extension-module", "abi3", "abi3-py314"] }
+

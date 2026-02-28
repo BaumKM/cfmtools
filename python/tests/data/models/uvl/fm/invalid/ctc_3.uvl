@@ -1,0 +1,8 @@
+features
+    Root
+        mandatory
+            A
+            B
+
+constraints
+    !(A <=> B)

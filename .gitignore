@@ -1,0 +1,12 @@
+.pytest_cache/
+.ruff_cache/
+.venv/
+.vscode/
+__pycache__/
+.coverage
+*.egg-info/
+rust/target
+**/*.pyd
+**/*.so
+**/*.dylib
+.VSCodeCounter/
