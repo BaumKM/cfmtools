@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import sys
+from typing import override
 
 
 from cfmtools.core.cfm import CFM
@@ -14,6 +15,7 @@ class RankingSampler(SampleAlgorithm):
     Uniform ranking sampler (Rust backend).
     """
 
+    @override
     def run_once(
         self,
         model: CFM,
@@ -26,6 +28,7 @@ class RankingSampler(SampleAlgorithm):
         print("This sampler is not implemented yet.", file=sys.stderr)
         raise NotImplementedError("Backtracking sampler is not implemented")
 
+    @override
     def run_benchmark(
         self,
         model: CFM,

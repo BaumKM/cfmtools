@@ -43,7 +43,7 @@ pub struct SampleResult<C, S> {
     pub statistics: S,
 }
 
-pub trait SampleStatistics: Clone + Serialize + Default {
+pub trait SampleStatistics: Clone + Serialize {
     fn accumulate(&mut self, other: Self);
 }
 

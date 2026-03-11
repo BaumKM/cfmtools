@@ -398,10 +398,10 @@ fn run_result_to_json<S: Serialize>(run: &RunResult<S>) -> Value {
 
 fn runtime_result_to_json(runtime: &RuntimeResult) -> Value {
     json!({
-        "setup_time": format_duration_us(&runtime.setup_time),
-        "sampling_time": format_duration_us(&runtime.sampling_time),
-        "ranking_time": format_duration_us(&runtime.ranking_time),
-        "total_time": format_duration_us(&
+        "setup_time_us": format_duration_us(&runtime.setup_time),
+        "sampling_time_us": format_duration_us(&runtime.sampling_time),
+        "ranking_time_us": format_duration_us(&runtime.ranking_time),
+        "total_time_us": format_duration_us(&
             (runtime.setup_time + runtime.sampling_time + runtime.ranking_time)),
     })
 }

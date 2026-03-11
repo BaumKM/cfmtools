@@ -10,7 +10,10 @@ use crate::{
         ConfigSpace, Configuration as _,
         structural::{StructuralBuilder, StructuralConfigSpace, StructuralNode, max_card},
     },
-    model::feature::{Feature, FeatureVec},
+    model::{
+        cfm::CFM,
+        feature::{Feature, FeatureVec},
+    },
     utils::{
         data_structures::{Tree, TreeTraversal},
         sampling::{AliasTable, CompoundRng},
@@ -71,12 +74,14 @@ impl MultiplicityTables {
 /// Uniform sampler that implements UniSample-BT (no cross-tree constraints).
 pub struct UniformBacktrackingSampler {
     config_space: StructuralConfigSpace,
+    cfm: Arc<CFM>,
 }
 
 impl UniformBacktrackingSampler {
     #[must_use]
     pub fn new(config_space: StructuralConfigSpace) -> Self {
-        Self { config_space }
+        let cfm = config_space.cfm().clone().into();
+        Self { config_space, cfm }
     }
 }
 
@@ -213,6 +218,7 @@ impl UniformSampler for UniformBacktrackingSampler {
             return SampleResult {
                 value: cfg,
                 statistics: BacktrackingStatistics {
+                    cfm: self.cfm.clone(),
                     sample_rejections,
                     multiset_rejections,
                 },
@@ -378,19 +384,11 @@ impl LogFactorials {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct BacktrackingStatistics {
+    cfm: Arc<CFM>,
     pub sample_rejections: usize,
     pub multiset_rejections: FeatureVec<usize>,
-}
-
-impl Default for BacktrackingStatistics {
-    fn default() -> Self {
-        Self {
-            sample_rejections: Default::default(),
-            multiset_rejections: vec![].into(),
-        }
-    }
 }
 
 impl SampleStatistics for BacktrackingStatistics {
@@ -404,6 +402,31 @@ impl SampleStatistics for BacktrackingStatistics {
         {
             *a += b;
         }
+    }
+}
+
+impl Serialize for BacktrackingStatistics {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let pairs: Vec<(String, usize)> = self
+            .cfm
+            .pre_order()
+            .map(|feature| {
+                (
+                    self.cfm.feature_name(feature).name().to_string(),
+                    self.multiset_rejections[feature],
+                )
+            })
+            .collect();
+
+        let mut s = serializer.serialize_struct("BacktrackingStatistics", 2)?;
+        s.serialize_field("sample_rejections", &self.sample_rejections)?;
+        s.serialize_field("multiset_rejections", &pairs)?;
+        s.end()
     }
 }
 
@@ -424,7 +447,7 @@ mod tests {
         // Build structural config space from the CFM
         let config_space = StructuralConfigSpace::new(cfm);
 
-        let sampler = UniformBacktrackingSampler { config_space };
+        let sampler = UniformBacktrackingSampler::new(config_space);
 
         // Build config cache
         let config_cache =
@@ -473,7 +496,7 @@ mod tests {
     fn assert_bt_sampler_is_uniform(cfm: Arc<CFM>) {
         // Build structural config space from the CFM
         let config_space = StructuralConfigSpace::new(cfm);
-        let sampler = UniformBacktrackingSampler { config_space };
+        let sampler = UniformBacktrackingSampler::new(config_space);
 
         // Build config cache
         let config_cache =
@@ -591,7 +614,7 @@ mod tests {
 
         // --- Additional semantic check: the dead branch is never sampled ---
         let config_space = StructuralConfigSpace::new(cfm.clone());
-        let sampler = UniformBacktrackingSampler { config_space };
+        let sampler = UniformBacktrackingSampler::new(config_space);
 
         let config_cache =
             <StructuralConfigSpace as ConfigSpace>::build_cache(&sampler.config_space);
@@ -625,7 +648,7 @@ mod tests {
 
         // --- Additional semantic check: the invalid branch is never sampled ---
         let config_space = StructuralConfigSpace::new(cfm.clone());
-        let sampler = UniformBacktrackingSampler { config_space };
+        let sampler = UniformBacktrackingSampler::new(config_space);
 
         let config_cache =
             <StructuralConfigSpace as ConfigSpace>::build_cache(&sampler.config_space);

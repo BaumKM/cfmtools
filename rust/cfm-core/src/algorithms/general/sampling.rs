@@ -68,7 +68,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RankingStatistics {
     pub sample_rejections: usize,
 }

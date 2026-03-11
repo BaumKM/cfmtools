@@ -78,7 +78,7 @@ where
         // Sampling phase
         // --------------------
         let mut counts: HashMap<Integer, usize> = HashMap::new();
-        let mut sampler_stats = U::Statistics::default();
+        let mut sampler_stats: Option<U::Statistics> = None;
 
         let mut sampling_time: Duration = Duration::ZERO;
         let mut ranking_time: Duration = Duration::ZERO;
@@ -94,7 +94,10 @@ where
             ranking_time += ranking_start.elapsed();
             *counts.entry(rank).or_insert(0) += 1;
 
-            sampler_stats.accumulate(statistics);
+            match &mut sampler_stats {
+                Some(acc) => acc.accumulate(statistics),
+                None => sampler_stats = Some(statistics),
+            }
         }
 
         let constrained_space_size: Option<Integer> = if !cfm.has_cross_tree_constraints() {
@@ -121,7 +124,7 @@ where
                 ranking_time,
             },
             uniformity,
-            sampler_stats,
+            sampler_stats: sampler_stats.expect("params.samples must be > 0"),
         });
     }
 
