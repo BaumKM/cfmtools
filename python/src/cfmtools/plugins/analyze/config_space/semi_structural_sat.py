@@ -116,7 +116,7 @@ def cfm_to_cp_sat(
     for feature in cfm.features():
         instance_vars[feature] = [
             model.new_bool_var(f"instance_{name(feature)}_{i}")
-            for i in range(0, max_instances[feature])
+            for i in range(max_instances[feature])
         ]
 
     # parents[f][i][j] = instance f_i is attached to parent instance p_j
@@ -124,16 +124,17 @@ def cfm_to_cp_sat(
         [[] for _ in range(cfm.n_features)]
     )
 
-    new_bool = model.new_bool_var
-
     for feature in cfm.features():
-        parent_instance = cfm.parents[feature]
-        n_f = max_instances[feature]
-        n_p = max_instances[parent_instance] if parent_instance is not None else 0
+        parent_feature = cfm.parents[feature]
+        n_child = max_instances[feature]
+        n_parent = max_instances[parent_feature] if parent_feature is not None else 0
 
         parent_vars[feature] = [
-            [new_bool(f"parent_{name(feature)}_{i}_{j}") for j in range(1, n_p + 1)]
-            for i in range(1, n_f + 1)
+            [
+                model.new_bool_var(f"parent_{name(feature)}_{i}_{j}")
+                for j in range(n_parent)
+            ]
+            for i in range(n_child)
         ]
 
     # is_present_in_group[p][i][c] = 1 iff under the i'th feature instance of p has,
@@ -216,9 +217,9 @@ def cfm_to_cp_sat(
         for i in range(max_instances[parent_feature]):
             parent_instance = instance_vars[parent_feature][i]
 
-            # child_instances_per_feature[c_index] = count of child c under p_i
             instances_per_child: list[IntVar] = []
 
+            # feature_instance_c_under_p_i
             for child_feature in children:
                 count_c_p_i = model.new_int_var(
                     0,
@@ -239,11 +240,12 @@ def cfm_to_cp_sat(
                     count_c_p_i,
                     parent_instance,
                     cfm.feature_instance_cardinalities[child_feature],
-                    name=f"fi_card_c{name(child_feature)}_p{name(parent_feature)}_{i}",
+                    name=f"fi_card_{name(child_feature)}_{name(parent_feature)}_{i}",
                 )
 
                 instances_per_child.append(count_c_p_i)
 
+            # group_instance_p_i
             group_instances = model.new_int_var(
                 0,
                 sum(max_instances[c] for c in children),
@@ -260,10 +262,11 @@ def cfm_to_cp_sat(
                 name=f"gi_card_{name(parent_feature)}_{i}",
             )
 
+            # group_type_p_i
             group_types = model.new_int_var(
                 0,
                 len(children),
-                f"cnt_types_under_{name(parent_feature)}_{i}",
+                f"group_type_{name(parent_feature)}_{i}",
             )
 
             model.add(group_types == sum(is_present_in_group[parent_feature][i]))
@@ -273,7 +276,7 @@ def cfm_to_cp_sat(
                 group_types,
                 parent_instance,
                 cfm.group_type_cardinalities[parent_feature],
-                name=f"gt_card_p{name(parent_feature)}_{i}",
+                name=f"gt_card_{name(parent_feature)}_{i}",
             )
 
     # ------------------------------------------------------------
@@ -291,8 +294,7 @@ def cfm_to_cp_sat(
     for feature in cfm.features():
         model.add(feature_count[feature] == sum(instance_vars[feature]))
 
-    # Require constraints:
-    # (feature_count[a] ∈ cardA) => (feature_count[b] ∈ cardB)
+    # Require
     for k, rc in enumerate(cfm.require_constraints):
         a = rc.first_feature
         b = rc.second_feature
@@ -312,9 +314,7 @@ def cfm_to_cp_sat(
 
         model.add_implication(a_in, b_in)
 
-    # Exclude constraints:
-    # ¬( (feature_count[a] ∈ cardA) ∧ (feature_count[b] ∈ cardB) )
-    # which is equivalent to: (¬a_in) ∨ (¬b_in)
+    # Exclude
     for k, ec in enumerate(cfm.exclude_constraints):
         a = ec.first_feature
         b = ec.second_feature

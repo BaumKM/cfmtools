@@ -151,7 +151,7 @@ pub fn compute_count_dp_tables(cfm: &CFM) -> (FeatureVec<CountDpTable>, FeatureV
             let rs = &child_multiplicities[0];
             let weights = Multiset::count_multisets_batched(total_child, rs);
 
-            for (&r, weight) in rs.iter().zip(weights.into_iter()) {
+            for (&r, weight) in rs.iter().zip(weights) {
                 let c_rem = usize::from(r > 0);
                 let k_rem = r;
 
