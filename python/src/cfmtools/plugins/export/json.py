@@ -11,7 +11,7 @@ from cfmtools.core.cfm import (
 )
 from cfmtools.pipeline.core import ParamHelp
 from cfmtools.pipeline.export import Exporter
-from cfmtools.pluginsystem import export
+from cfmtools.pluginsystem import exporter
 from cfmtools.util import JSON
 
 # ---------------------------
@@ -139,7 +139,7 @@ def _serialize_cfm(model: CFM) -> JSON:
 # ---------------------------
 
 
-@export("json")
+@exporter("json")
 class JsonExporter(Exporter):
     """
     Export the current CFM model to JSON.

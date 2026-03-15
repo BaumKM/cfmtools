@@ -9,7 +9,11 @@ from cfmtools.pipeline.transform import Transformer
 from cfmtools.pluginsystem._registry import register_step
 
 
-def load(name: str):
+def loader(name: str):
+    """
+    Decorator for registering a load command.
+    """
+
     def decorator(cls: Type[Loader]):
         register_step(StepType.LOAD, cls, name=name)
         return cls
@@ -17,7 +21,11 @@ def load(name: str):
     return decorator
 
 
-def export(name: str):
+def exporter(name: str):
+    """
+    Decorator for registering a export command.
+    """
+
     def decorator(cls: Type[Exporter]):
         register_step(StepType.EXPORT, cls, name=name)
         return cls
@@ -25,9 +33,9 @@ def export(name: str):
     return decorator
 
 
-def transform(name: str):
+def transformer(name: str):
     """
-    Decorator for registering a Transform step.
+    Decorator for registering a transform command.
     """
 
     def decorator(cls: Type[Transformer]):
@@ -37,9 +45,9 @@ def transform(name: str):
     return decorator
 
 
-def analyze(name: str):
+def analyzer(name: str):
     """
-    Decorator for registering a Analyze step.
+    Decorator for registering a analyze command.
     """
 
     def decorator(cls: Type[Analyzer]):
@@ -51,12 +59,12 @@ def analyze(name: str):
 
 def sampler(name: str, *, spaces: set[str]):
     """
-    Decorator for registering a SamplerPlugin.
+    Decorator for registering a sampling algorithm.
 
 
     Example:
     @sampler("ranking", spaces={"structural"})
-    class RankingSampler(SamplerPlugin):
+    class RankingSampler(SampleAlgorithm):
     ...
     """
 

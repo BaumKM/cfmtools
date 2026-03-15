@@ -2,11 +2,11 @@ import inspect
 from typing import override
 from cfmtools.core.cfm import CFM
 from cfmtools.core.transforms.big_m import apply_big_m
-from cfmtools.pluginsystem import transform
+from cfmtools.pluginsystem import transformer
 from cfmtools.pipeline.transform import Transformer
 
 
-@transform("big-m")
+@transformer("big-m")
 class BigMTransform(Transformer):
     """
     Apply Big-M transformation to bound cardinalities.

@@ -6,10 +6,10 @@ from typing import Annotated, override
 from cfmtools.core.cfm import CFM
 from cfmtools.pipeline.core import ParamBehavior, ParamHelp
 from cfmtools.pipeline.analyze import Analyzer
-from cfmtools.pluginsystem import analyze
+from cfmtools.pluginsystem import analyzer
 
 
-@analyze("structural-unconstrained")
+@analyzer("structural-unconstrained")
 class UnconstrainedConfigurationSpaceSummary(Analyzer):
     """
     Compute a summary of the unconstrained structural configuration space
@@ -77,7 +77,7 @@ class UnconstrainedConfigurationSpaceSummary(Analyzer):
             json.dump(result, f, indent=2)
 
 
-@analyze("structural-constrained")
+@analyzer("structural-constrained")
 class ConstrainedConfigurationSpaceSummary(Analyzer):
     """
     Compute a summary of the constrained structural configuration space

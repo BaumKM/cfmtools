@@ -6,10 +6,10 @@ from cfmtools.core.transforms.trivial_dead_cardinalities import (
     eliminate_trivial_dead_cardinalities,
 )
 from cfmtools.pipeline.transform import Transformer
-from cfmtools.pluginsystem import transform
+from cfmtools.pluginsystem import transformer
 
 
-@transform("eliminate-trivial-dead-cardinalities")
+@transformer("eliminate-trivial-dead-cardinalities")
 class EliminateDeadCardinalitiesTransform(Transformer):
     """
     Eliminate trivial dead cardinalities from the model.

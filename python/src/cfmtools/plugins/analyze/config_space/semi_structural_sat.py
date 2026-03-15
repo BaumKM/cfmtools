@@ -9,7 +9,7 @@ from ortools.sat.python import cp_model
 
 from cfmtools.pipeline.analyze import Analyzer
 from cfmtools.pipeline.core import ParamHelp
-from cfmtools.pluginsystem import analyze
+from cfmtools.pluginsystem import analyzer
 
 
 def _enforce_cardinality_when_active(
@@ -361,7 +361,7 @@ def cfm_to_cp_sat(
     return model, instance_vars, parent_vars, max_instances
 
 
-@analyze("semi-structural-sat")
+@analyzer("semi-structural-sat")
 class ConfigurationSpaceSummary(Analyzer):
 
     @classmethod

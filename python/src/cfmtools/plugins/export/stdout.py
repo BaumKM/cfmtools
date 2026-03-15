@@ -3,10 +3,10 @@ from typing import override
 
 from cfmtools.core.cfm import CFM
 from cfmtools.pipeline.export import Exporter
-from cfmtools.pluginsystem import export
+from cfmtools.pluginsystem import exporter
 
 
-@export("stdout")
+@exporter("stdout")
 class PrettyPrintExporter(Exporter):
     """
     Export a CFM model as a human-readable pretty-printed tree to stdout.

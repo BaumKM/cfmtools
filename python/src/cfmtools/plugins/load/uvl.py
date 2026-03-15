@@ -12,7 +12,7 @@ from cfmtools.core.cfm import (
 )
 from cfmtools.pipeline.core import ParamHelp
 from cfmtools.pipeline.load import Loader
-from cfmtools.pluginsystem import load
+from cfmtools.pluginsystem import loader
 
 from antlr4 import CommonTokenStream, InputStream, ParserRuleContext
 from antlr4.error.ErrorListener import ErrorListener
@@ -599,7 +599,7 @@ def convert_to_cfm(model: _UVLModel) -> CFM:
 log = logging.getLogger(__name__)
 
 
-@load("uvl-fm")
+@loader("uvl-fm")
 class UVLFeatureModelLoader(Loader):
     """
     Load a UVL file as a Boolean feature model.

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Annotated, override
 from cfmtools.pipeline.core import ParamBehavior, ParamHelp
-from cfmtools.pluginsystem import load
+from cfmtools.pluginsystem import loader
 from cfmtools.pipeline.load import Loader
 
 from cfmtools.core.cfm import (
@@ -254,7 +254,7 @@ def _parse_cfm_from_json(
     return builder.build()
 
 
-@load("json")
+@loader("json")
 class JsonLoader(Loader):
     """
     Load a CFM model from JSON.

@@ -8,7 +8,7 @@ import statistics
 from cfmtools.core.cfm import CFM, CardinalityInterval
 from cfmtools.pipeline.analyze import Analyzer
 from cfmtools.pipeline.core import ParamHelp
-from cfmtools.pluginsystem import analyze
+from cfmtools.pluginsystem import analyzer
 
 
 def _tree_height(model: CFM) -> int:
@@ -78,7 +78,7 @@ def _total_instance_bound(model: CFM) -> int:
     return sum(bounds)
 
 
-@analyze("feature-tree")
+@analyzer("feature-tree")
 class FeatureTreeAnalyzer(Analyzer):
     """
     Compute a tree and cardinality summary of a CFM.
