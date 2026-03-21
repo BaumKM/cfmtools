@@ -3,10 +3,11 @@ import json
 from pathlib import Path
 import time
 from typing import Annotated, override
-from cfmtools.core.cfm import CFM, JSON, CardinalityInterval, FeatureList
-from ortools.sat.python.cp_model import CpModel, IntVar
-from ortools.sat.python import cp_model
 
+from ortools.sat.python import cp_model
+from ortools.sat.python.cp_model import CpModel, IntVar
+
+from cfmtools.core.cfm import CFM, JSON, CardinalityInterval, FeatureList
 from cfmtools.pipeline.analyze import Analyzer
 from cfmtools.pipeline.core import ParamHelp
 from cfmtools.pluginsystem import analyzer
@@ -91,165 +92,146 @@ def _in_cardinality_interval_bool(
     return b
 
 
+def _max_cardinality(card: CardinalityInterval, *, what: str) -> int:
+    """
+    Return the finite maximum of a cardinality interval.
+    """
+    max_value = card.max
+    if max_value is None:
+        raise ValueError(
+            f"Cannot build hierarchical CP-SAT cloning encoding: "
+            f"{what} has an unbounded cardinality interval ({card})."
+        )
+    return max_value
+
+
 def cfm_to_cp_sat(
     cfm: CFM,
-) -> tuple[
-    CpModel,
-    FeatureList[list[IntVar]],
-    FeatureList[list[list[IntVar]]],
-    FeatureList[int],
-]:
+) -> tuple[CpModel, FeatureList[list[IntVar]], FeatureList[list[tuple[int, int]]]]:
     model: CpModel = CpModel()
-
-    max_instances: FeatureList[int] = cfm.compute_instance_bounds()
     name = cfm.feature_name
 
     # ------------------------------------------------------------
     # Variables
     # ------------------------------------------------------------
 
-    # instances[f][i] = whether instance i of feature f exists
+    # instance_vars[f] = flat list of all potential instances of feature f
     instance_vars: FeatureList[list[IntVar]] = FeatureList(
         [[] for _ in range(cfm.n_features)]
     )
 
-    for feature in cfm.features():
-        instance_vars[feature] = [
-            model.new_bool_var(f"instance_{name(feature)}_{i}")
-            for i in range(max_instances[feature])
-        ]
-
-    # parents[f][i][j] = instance f_i is attached to parent instance p_j
-    parent_vars: FeatureList[list[list[IntVar]]] = FeatureList(
+    # instance_offsets[f][p_i] = (start, end)
+    # feature instances that belong under i'th instance of p
+    # i.e., instance_vars[f][start:end] are exactly those child instances
+    instance_offsets: FeatureList[list[tuple[int, int]]] = FeatureList(
         [[] for _ in range(cfm.n_features)]
     )
 
-    for feature in cfm.features():
-        parent_feature = cfm.parents[feature]
-        n_child = max_instances[feature]
-        n_parent = max_instances[parent_feature] if parent_feature is not None else 0
-
-        parent_vars[feature] = [
-            [
-                model.new_bool_var(f"parent_{name(feature)}_{i}_{j}")
-                for j in range(n_parent)
-            ]
-            for i in range(n_child)
-        ]
-
-    # is_present_in_group[p][i][c] = 1 iff under the i'th feature instance of p has,
-    # at least one instance of child c
-    is_present_in_group: FeatureList[list[list[IntVar]]] = FeatureList(
-        [[] for _ in range(cfm.n_features)]
-    )
-
-    for parent_feature in cfm.features():
-        children = cfm.children[parent_feature]
-
-        for i in range(max_instances[parent_feature]):
-            row: list[IntVar] = []
-
-            for child_feature in children:
-                present = model.new_bool_var(
-                    f"is_present_under_{name(parent_feature)}_{i}_{name(child_feature)}"
-                )
-                row.append(present)
-
-                if max_instances[child_feature] > 0:
-                    model.add_max_equality(
-                        present,
-                        [
-                            parent_vars[child_feature][j][i]
-                            for j in range(max_instances[child_feature])
-                        ],
-                    )
-                else:
-                    model.add(present == 0)
-
-            is_present_in_group[parent_feature].append(row)
-
-    # ------------------------------------------------------------
-    # Structural constraints
-    # ------------------------------------------------------------
-
-    # Root must always be selected
     root = cfm.root
-    model.add(instance_vars[root][0] == 1)
+    root_var = model.new_bool_var(f"instance_{name(root)}_0")
+    instance_vars[root] = [root_var]
+    instance_offsets[root] = [(0, 1)]
 
-    # Every active child instance has exactly one parent
+    for feature in cfm.traverse_preorder():
+        parent_feature = cfm.parents[feature]
+        if parent_feature is None:
+            continue
+
+        max_per_parent = _max_cardinality(
+            cfm.feature_instance_cardinalities[feature],
+            what=f"feature {name(feature)}",
+        )
+
+        for parent_i in range(len(instance_vars[parent_feature])):
+            start = len(instance_vars[feature])
+
+            for _ in range(max_per_parent):
+                instance_index = len(instance_vars[feature])
+                instance_vars[feature].append(
+                    model.new_bool_var(f"instance_{name(feature)}_{instance_index}")
+                )
+
+            end = len(instance_vars[feature])
+            instance_offsets[feature].append((start, end))
+
+    # ------------------------------------------------------------
+    # Feature Tree constraints
+    # ------------------------------------------------------------
+
+    # Root must always be selected.
+    model.add(root_var == 1)
+
+    # A child instance may only be active if its parent instance is active.
     for feature in cfm.features():
         parent_feature = cfm.parents[feature]
         if parent_feature is None:
             continue
 
-        for i in range(max_instances[feature]):
-            model.add(
-                sum(
-                    parent_vars[feature][i][j]
-                    for j in range(max_instances[parent_feature])
-                )
-                == instance_vars[feature][i]
-            )
+        for parent_i, (start, end) in enumerate(instance_offsets[feature]):
+            parent_active = instance_vars[parent_feature][parent_i]
 
-            # Cannot attach to inactive parent
-            for j in range(max_instances[parent_feature]):
-                model.add(
-                    parent_vars[feature][i][j] <= instance_vars[parent_feature][j]
-                )
+            for i in range(start, end):
+                model.add(instance_vars[feature][i] <= parent_active)
 
     # ------------------------------------------------------------
     # Cardinality constraints
     # ------------------------------------------------------------
 
-    # For each feature instance p_i,
-    # (1) feature instance cardinality: number of child instances of c attached under p_i
-    #     must be within feature_instance_cardinalities[c]
-    #
-    # (2) group instance cardinality: total number of child instances attached under p_i
-    #     (across all child features) must be within group_instance_cardinalities[p]
-    #
-    # (3) group type cardinality: number of distinct child feature types present under p_i
-    #     must be within group_type_cardinalities[p]
-
+    # For each potential parent instance p_i:
+    #   (1) each child feature count under p_i must satisfy feature-instance cardinality
+    #   (2) total child count must satisfy group-instance cardinality of p
+    #   (3) number of distinct child types present must satisfy group-type cardinality of p
     for parent_feature in cfm.features():
         children = cfm.children[parent_feature]
 
-        for i in range(max_instances[parent_feature]):
-            parent_instance = instance_vars[parent_feature][i]
+        for parent_i in range(len(instance_vars[parent_feature])):
+            parent_instance = instance_vars[parent_feature][parent_i]
 
             instances_per_child: list[IntVar] = []
+            present_per_child: list[IntVar] = []
 
-            # feature_instance_c_under_p_i
             for child_feature in children:
-                count_c_p_i = model.new_int_var(
+                start, end = instance_offsets[child_feature][parent_i]
+                child_vars = instance_vars[child_feature][start:end]
+
+                # feature_instance_c_i
+                child_count = model.new_int_var(
                     0,
-                    max_instances[child_feature],
-                    f"feature_instance_{name(child_feature)}_under_{name(parent_feature)}_{i}",
+                    len(child_vars),
+                    f"feature_instance_{name(child_feature)}_{parent_i}",
                 )
 
-                model.add(
-                    count_c_p_i
-                    == sum(
-                        parent_vars[child_feature][j][i]
-                        for j in range(max_instances[child_feature])
-                    )
-                )
+                model.add(child_count == sum(child_vars))
 
                 _enforce_cardinality_when_active(
                     model,
-                    count_c_p_i,
+                    child_count,
                     parent_instance,
                     cfm.feature_instance_cardinalities[child_feature],
-                    name=f"fi_card_{name(child_feature)}_{name(parent_feature)}_{i}",
+                    name=f"fi_card_{name(child_feature)}_{parent_i}",
                 )
 
-                instances_per_child.append(count_c_p_i)
+                instances_per_child.append(child_count)
+
+                present = model.new_bool_var(
+                    f"present_{name(child_feature)}_{parent_i}"
+                )
+
+                if child_vars:
+                    model.add_max_equality(present, child_vars)
+                else:
+                    model.add(present == 0)
+
+                present_per_child.append(present)
 
             # group_instance_p_i
             group_instances = model.new_int_var(
                 0,
-                sum(max_instances[c] for c in children),
-                f"group_instance_{name(parent_feature)}_{i}",
+                sum(
+                    instance_offsets[c][parent_i][1] - instance_offsets[c][parent_i][0]
+                    for c in children
+                ),
+                f"group_instance_{name(parent_feature)}_{parent_i}",
             )
 
             model.add(group_instances == sum(instances_per_child))
@@ -259,24 +241,24 @@ def cfm_to_cp_sat(
                 group_instances,
                 parent_instance,
                 cfm.group_instance_cardinalities[parent_feature],
-                name=f"gi_card_{name(parent_feature)}_{i}",
+                name=f"gi_{name(parent_feature)}_{parent_i}",
             )
 
             # group_type_p_i
             group_types = model.new_int_var(
                 0,
                 len(children),
-                f"group_type_{name(parent_feature)}_{i}",
+                f"group_type_{name(parent_feature)}_{parent_i}",
             )
 
-            model.add(group_types == sum(is_present_in_group[parent_feature][i]))
+            model.add(group_types == sum(present_per_child))
 
             _enforce_cardinality_when_active(
                 model,
                 group_types,
                 parent_instance,
                 cfm.group_type_cardinalities[parent_feature],
-                name=f"gt_card_{name(parent_feature)}_{i}",
+                name=f"gt_card_{name(parent_feature)}_{parent_i}",
             )
 
     # ------------------------------------------------------------
@@ -286,7 +268,7 @@ def cfm_to_cp_sat(
     # Global count of instances per feature: feature_count[f] = number of active instances of f
     feature_count: FeatureList[IntVar] = FeatureList(
         [
-            model.new_int_var(0, max_instances[f], f"cnt_{name(f)}")
+            model.new_int_var(0, len(instance_vars[f]), f"cnt_{name(f)}")
             for f in cfm.features()
         ]
     )
@@ -335,30 +317,20 @@ def cfm_to_cp_sat(
         model.add_bool_or([a_in.Not(), b_in.Not()])
 
     # ------------------------------------------------------------
-    # Dense feature instances (symmetry breaking)
+    # Symmetry breaking
     # ------------------------------------------------------------
 
+    # Dense usage of child instances under each parent instance
     for feature in cfm.features():
-        inst = instance_vars[feature]
-        for i in range(len(inst) - 1):
-            model.add(inst[i + 1] <= inst[i])
-
-    # ------------------------------------------------------------
-    # Dense parent assignment (children fill parents left-to-right)
-    # ------------------------------------------------------------
-    for child_feature in cfm.features():
-        parent_feature = cfm.parents[child_feature]
+        parent_feature = cfm.parents[feature]
         if parent_feature is None:
             continue
 
-        for j in range(max_instances[child_feature] - 1):
-            for i in range(max_instances[parent_feature]):
-                model.add(
-                    sum(parent_vars[child_feature][j][k] for k in range(i + 1))
-                    >= sum(parent_vars[child_feature][j + 1][k] for k in range(i + 1))
-                )
+        for parent_i, (start, end) in enumerate(instance_offsets[feature]):
+            for i in range(start, end - 1):
+                model.add(instance_vars[feature][i + 1] <= instance_vars[feature][i])
 
-    return model, instance_vars, parent_vars, max_instances
+    return model, instance_vars, instance_offsets
 
 
 @analyzer("semi-structural-sat")
@@ -438,10 +410,11 @@ class ConfigurationSpaceSummary(Analyzer):
     def analyze(self, model: CFM) -> None:
         build_start = time.perf_counter()
 
-        sat_model, _instance_vars, _parent_vars, max_instances = cfm_to_cp_sat(model)
-        total_instance_variables = sum(max_instances)
+        sat_model, instance_vars, _instance_offsets = cfm_to_cp_sat(model)
 
         build_time_us = int((time.perf_counter() - build_start) * 1_000_000)
+
+        total_instance_variables = sum(len(instance_vars[f]) for f in model.features())
 
         solver = cp_model.CpSolver()
         solver.parameters.enumerate_all_solutions = True

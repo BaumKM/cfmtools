@@ -37,8 +37,7 @@ def enumerate_configurations(
     cfm: CFM,
     model: cp_model.CpModel,
     instance_vars: FeatureList[list[cp_model.IntVar]],
-    parent_vars: FeatureList[list[list[cp_model.IntVar]]],
-    vars_per_feature: FeatureList[int],
+    instance_offsets: FeatureList[list[tuple[int, int]]],
 ) -> list[InstNode]:
     solver = cp_model.CpSolver()
     solver.parameters.enumerate_all_solutions = True
@@ -51,25 +50,28 @@ def enumerate_configurations(
                 cfm,
                 self,
                 instance_vars,
-                parent_vars,
-                vars_per_feature,
+                instance_offsets,
             )
             configs.append(root)
 
     status = solver.solve(model, Collector())
     assert status == cp_model.OPTIMAL
 
+    tuple_reprs = [cfg.tuple_repr() for cfg in configs]
+    assert len(tuple_reprs) == len(set(tuple_reprs)), "Duplicate configurations found"
+
     return configs
 
 
-def print_tree(cfm: CFM, node: InstNode, indent: str = ""):
-    # +1 since feature instances indices are actually 1 based
-    print(f"{indent}{node.feature_name}[{node.idx}]")
+def print_tree(cfm: CFM, node: InstNode, indent: str = "") -> str:
+    lines = [f"{indent}{node.feature_name}[{node.idx}]"]
 
     node.children.sort(key=lambda n: (n.feature_name, n.idx))
 
     for ch in node.children:
-        print_tree(cfm, ch, indent + "  ")
+        lines.append(print_tree(cfm, ch, indent + "  "))
+
+    return "\n".join(lines)
 
 
 TupleNode: TypeAlias = tuple[
@@ -103,8 +105,7 @@ def decode_solution(
     cfm: CFM,
     solver: cp_model.CpSolverSolutionCallback,
     instance_vars: FeatureList[list[cp_model.IntVar]],
-    parent_vars: FeatureList[list[list[cp_model.IntVar]]],
-    vars_per_feature: FeatureList[int],
+    instance_offsets: FeatureList[list[tuple[int, int]]],
 ) -> InstNode:
     root = cfm.root
 
@@ -113,41 +114,51 @@ def decode_solution(
     )
 
     for feature in cfm.features():
-        nodes[feature] = [None] * vars_per_feature[feature]
-        for i in range(vars_per_feature[feature]):
+        n = len(instance_vars[feature])
+        nodes[feature] = [None] * n
+
+        for i in range(n):
             if solver.value(instance_vars[feature][i]) == 1:
                 nodes[feature][i] = InstNode(
-                    feature_name=cfm.feature_name(feature), idx=i
+                    feature_name=cfm.feature_name(feature),
+                    idx=i,
                 )
 
-    # Attach children to parents based on parent_vars
-    for child in cfm.features():
-        parent = cfm.parents[child]
-        if parent is None:
+    # Attach children to parents using instance_offsets
+    for feature in cfm.features():
+        parent_feature = cfm.parents[feature]
+        if parent_feature is None:
             continue
 
-        for ci in range(vars_per_feature[child]):
-            child_node = nodes[child][ci]
-            if child_node is None:
+        feature_counter = 0
+
+        for parent_i, (start, end) in enumerate(instance_offsets[feature]):
+            parent_node = nodes[parent_feature][parent_i]
+
+            # if parent inactive -> all children must be inactive anyway
+            if parent_node is None:
                 continue
 
-            # find which parent instance it's attached to
-            attached_parent_idx = None
-            for pj in range(vars_per_feature[parent]):
-                if solver.value(parent_vars[child][ci][pj]) == 1:
-                    attached_parent_idx = pj
+            # iterate over children in this slice
+            for ci in range(start, end):
+                child_node = nodes[feature][ci]
+                if child_node is None:
+                    # Assert prefix property: everything after must also be None
+                    for cj in range(ci + 1, end):
+                        assert nodes[feature][cj] is None, (
+                            f"Gap in instances for feature {cfm.feature_name(feature)}: "
+                            f"index {cj} active after inactive at {ci}"
+                        )
                     break
 
-            assert attached_parent_idx is not None
+                child_node.idx = feature_counter
+                feature_counter += 1
 
-            parent_node = nodes[parent][attached_parent_idx]
-
-            assert parent_node is not None
-
-            parent_node.children.append(child_node)
+                parent_node.children.append(child_node)
 
     root_node = nodes[root][0]
     assert root_node is not None
+
     return root_node
 
 
@@ -233,10 +244,14 @@ class SandwichConfigurations:
 def test_sandwich_semi_structural_sat():
     cfm = sandwich_cfm()
 
-    model, instance_vars, parent_vars, vars_per_feature = cfm_to_cp_sat(cfm)
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
     found = enumerate_configurations(
-        cfm, model, instance_vars, parent_vars, vars_per_feature
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
     )
+
     targets = SandwichConfigurations.configurations()
 
     found_set = {config.tuple_repr() for config in found}
@@ -545,9 +560,12 @@ class TableConfigurations:
 def test_table_semi_structural_sat():
     cfm = table_cfm()
 
-    model, instance_vars, parent_vars, vars_per_feature = cfm_to_cp_sat(cfm)
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
     found = enumerate_configurations(
-        cfm, model, instance_vars, parent_vars, vars_per_feature
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
     )
 
     targets = TableConfigurations.configurations()
@@ -604,8 +622,14 @@ class SimpleConfigurations:
 
 def test_simple_semi_structural_sat():
     cfm = simple_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
 
     found_set = {config.tuple_repr() for config in found}
     target_set = {
@@ -636,8 +660,14 @@ class WideConfigurations:
 
 def test_wide_semi_structural_sat():
     cfm = wide_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
 
     found_set = {config.tuple_repr() for config in found}
     target_set = {config.tuple_repr() for config in WideConfigurations.configurations()}
@@ -744,8 +774,15 @@ class DeepConfigurations:
 
 def test_deep_semi_structural_sat():
     cfm = deep_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
+
     target_set = {config.tuple_repr() for config in DeepConfigurations.configurations()}
     found_set = {config.tuple_repr() for config in found}
 
@@ -764,8 +801,14 @@ class GapConfigurations:
 
 def test_gap_semi_structural_sat():
     cfm = gap_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
 
     assert {config.tuple_repr() for config in found} == {
         config.tuple_repr() for config in GapConfigurations.configurations()
@@ -800,8 +843,14 @@ class LargeGapConfigurations:
 
 def test_large_gap_semi_structural_sat():
     cfm = large_gap_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
 
     assert {config.tuple_repr() for config in found} == {
         config.tuple_repr() for config in LargeGapConfigurations.configurations()
@@ -819,8 +868,14 @@ class CutoffConfigurations:
 
 def test_cutoff_semi_structural_sat():
     cfm = cutoff_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
 
     assert {config.tuple_repr() for config in found} == {
         config.tuple_repr() for config in CutoffConfigurations.configurations()
@@ -868,8 +923,14 @@ class DeepChainConfigurations:
 
 def test_deep_chain_semi_structural_sat():
     cfm = deep_chain_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
 
     assert {config.tuple_repr() for config in found} == {
         config.tuple_repr() for config in DeepChainConfigurations.configurations()
@@ -890,8 +951,14 @@ class GroupRestrictedConfigurations:
 
 def test_group_restricted_semi_structural_sat():
     cfm = group_restricted_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
 
     assert {config.tuple_repr() for config in found} == {
         config.tuple_repr() for config in GroupRestrictedConfigurations.configurations()
@@ -906,8 +973,14 @@ class DeadBranchConfigurations:
 
 def test_dead_branch_semi_structural_sat():
     cfm = dead_branch_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
 
     assert {config.tuple_repr() for config in found} == {
         config.tuple_repr() for config in DeadBranchConfigurations.configurations()
@@ -931,9 +1004,15 @@ class RequireSimpleConfigurations:
 
 def test_require_simple_semi_structural_sat():
     cfm = require_simple_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
 
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
+
     found_set = {config.tuple_repr() for config in found}
     target_set = {
         config.tuple_repr() for config in RequireSimpleConfigurations.configurations()
@@ -959,9 +1038,15 @@ class ExcludeSimpleConfigurations:
 
 def test_exclude_simple_semi_structural_sat():
     cfm = exclude_simple_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
 
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
+
     found_set = {config.tuple_repr() for config in found}
     target_set = {
         config.tuple_repr() for config in ExcludeSimpleConfigurations.configurations()
@@ -989,9 +1074,15 @@ class MixedConstraintsConfigurations:
 
 def test_mixed_constraints_semi_structural_sat():
     cfm = mixed_constraints_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
 
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
+
     found_set = {config.tuple_repr() for config in found}
     target_set = {
         config.tuple_repr()
@@ -1021,9 +1112,15 @@ class SingleConfigDeepConfigurations:
 
 def test_single_config_deep_semi_structural_sat():
     cfm = single_config_deep_cfm()
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
 
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
+
     found_set = {config.tuple_repr() for config in found}
     target_set = {
         config.tuple_repr()
@@ -1062,8 +1159,13 @@ class TwoConfigDeepConfigurations:
 def test_two_config_deep_cfm():
     cfm = two_config_deep_cfm()
 
-    model, iv, pv, vpf = cfm_to_cp_sat(cfm)
-    found = enumerate_configurations(cfm, model, iv, pv, vpf)
+    model, instance_vars, instance_offsets = cfm_to_cp_sat(cfm)
+    found = enumerate_configurations(
+        cfm,
+        model,
+        instance_vars,
+        instance_offsets,
+    )
 
     found_set = {config.tuple_repr() for config in found}
     target_set = {
@@ -1082,7 +1184,7 @@ def solve_status_only(
 def test_empty_by_cross_tree_semi_structural_sat():
     cfm = empty_by_cross_tree_cfm()
 
-    model, _, _, _ = cfm_to_cp_sat(cfm)
+    model, _, _ = cfm_to_cp_sat(cfm)
     status = solve_status_only(model)
 
     assert status == cp_model.INFEASIBLE
@@ -1091,7 +1193,7 @@ def test_empty_by_cross_tree_semi_structural_sat():
 def test_empty_by_group_cardinality_semi_structural_sat():
     cfm = empty_by_group_cardinality_cfm()
 
-    model, _, _, _ = cfm_to_cp_sat(cfm)
+    model, _, _ = cfm_to_cp_sat(cfm)
     status = solve_status_only(model)
 
     assert status == cp_model.INFEASIBLE
@@ -1100,7 +1202,7 @@ def test_empty_by_group_cardinality_semi_structural_sat():
 def test_empty_by_feature_cardinality_semi_structural_sat():
     cfm = empty_by_feature_cardinality_cfm()
 
-    model, _, _, _ = cfm_to_cp_sat(cfm)
+    model, _, _ = cfm_to_cp_sat(cfm)
     status = solve_status_only(model)
 
     assert status == cp_model.INFEASIBLE
