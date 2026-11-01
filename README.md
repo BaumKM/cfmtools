@@ -12,8 +12,8 @@ It supports importing, transforming, analyzing, summarizing, and **uniform rando
 - **Structural configuration semantics**
 - **Semi-structural configuration semantics**
 
-> Structural and semi-structural configuration semantics are introduced in  
-> *(Thesis link placeholder — to be released)*
+> Structural and semi-structural configuration semantics are introduced in
+> [Bachelor's Thesis: Uniform Random Sampling for Cardinality-Based Feature Models](docs/thesis/thesis.pdf)
 
 ---
 
